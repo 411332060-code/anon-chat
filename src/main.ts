@@ -2,13 +2,20 @@ import { createClient } from '@supabase/supabase-js'
 import './style.css'
 
 interface Message {
-  id: number
+  id: string
+  author_id: string
   nickname: string
   content: string
   created_at: string
 }
 
 const HISTORY_LIMIT = 50
+
+const ERROR_TEXT: Record<string, string> = {
+  EMPTY: '訊息不能是空的',
+  TOO_LONG: '訊息太長了(上限 500 字)',
+  RATE_LIMITED: '送太快了,請稍等幾秒',
+}
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
@@ -24,35 +31,21 @@ function showStatus(text: string) {
   statusEl.hidden = false
 }
 
-function randomNickname(): string {
-  const animals = ['貓', '狗', '兔', '狐', '熊', '鹿', '鳥', '鯨']
-  const animal = animals[Math.floor(Math.random() * animals.length)]
-  return `匿名${animal}${Math.floor(Math.random() * 900 + 100)}`
+function friendlyError(message: string): string {
+  const code = Object.keys(ERROR_TEXT).find((c) => message.includes(c))
+  return code ? ERROR_TEXT[code] : `送出失敗:${message}`
 }
 
-function loadNickname(): string {
-  try {
-    const saved = localStorage.getItem('nickname')
-    if (saved) return saved
-    const fresh = randomNickname()
-    localStorage.setItem('nickname', fresh)
-    return fresh
-  } catch {
-    return randomNickname()
-  }
-}
-
-const nickname = loadNickname()
-meEl.textContent = `你是:${nickname}`
-
-const seen = new Set<number>()
+let myId = ''
+const seen = new Set<string>()
 
 function render(msg: Message) {
   if (seen.has(msg.id)) return
   seen.add(msg.id)
 
+  const mine = msg.author_id === myId
   const li = document.createElement('li')
-  if (msg.nickname === nickname) li.className = 'mine'
+  if (mine) li.className = 'mine'
 
   const name = document.createElement('span')
   name.className = 'name'
@@ -71,7 +64,7 @@ function render(msg: Message) {
 
   const atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80
   listEl.append(li)
-  if (atBottom || li.classList.contains('mine')) listEl.scrollTop = listEl.scrollHeight
+  if (atBottom || mine) listEl.scrollTop = listEl.scrollHeight
 }
 
 async function main() {
@@ -83,6 +76,25 @@ async function main() {
 
   const supabase = createClient(url, key)
 
+  // Anonymous sign-in: no UI, the browser just gets an identity (kept in localStorage).
+  let session = (await supabase.auth.getSession()).data.session
+  if (!session) {
+    const { data, error } = await supabase.auth.signInAnonymously()
+    if (error || !data.session) {
+      showStatus(`無法建立匿名身分:${error?.message ?? '未知錯誤'}`)
+      return
+    }
+    session = data.session
+  }
+  myId = session.user.id
+
+  const { data: nickname, error: joinError } = await supabase.rpc('join_chat')
+  if (joinError) {
+    showStatus(`無法進入聊天室:${joinError.message}`)
+    return
+  }
+  meEl.textContent = `你是:${nickname}`
+
   supabase
     .channel('public:messages')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) =>
@@ -93,7 +105,7 @@ async function main() {
   const { data, error } = await supabase
     .from('messages')
     .select('*')
-    .order('id', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT)
 
   if (error) {
@@ -108,10 +120,11 @@ async function main() {
     const content = inputEl.value.trim()
     if (!content) return
     inputEl.value = ''
-    const { error } = await supabase.from('messages').insert({ nickname, content })
+    // The client only sends id + content; the database decides who/when.
+    const { error } = await supabase.from('messages').insert({ id: crypto.randomUUID(), content })
     if (error) {
       inputEl.value = content
-      showStatus(`送出失敗:${error.message}`)
+      showStatus(friendlyError(error.message))
     } else {
       statusEl.hidden = true
     }
