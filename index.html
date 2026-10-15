@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>匿名聊天室</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>匿名聊天室</h1>
+        <span id="me"></span>
+      </header>
+      <ul id="messages" aria-live="polite"></ul>
+      <p id="status" hidden></p>
+      <form id="form" autocomplete="off">
+        <input id="input" maxlength="500" placeholder="說點什麼…" required />
+        <button type="submit">送出</button>
+      </form>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
